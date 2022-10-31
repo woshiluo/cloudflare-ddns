@@ -2,6 +2,18 @@
 
 Yet another ddns client over cloudflare api written by rust.
 
+# How to build?
+
+You should install rust toolchins like https://rustup.rs/.
+
+```
+git clone https://github.com/woshiluo/cloudflare-ddns
+cd ./cloudflare-ddns
+cargo build --release
+```
+
+Then the binary will be plcaed in `target/release/cloudflare-ddns`
+
 # How to use?
 
 You should provide four arguments.
