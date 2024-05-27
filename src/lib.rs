@@ -4,10 +4,11 @@
 // Distributed under terms of the GNU AGPLv3+ license.
 //
 use cloudflare::endpoints::{dns, zone};
-use cloudflare::framework::apiclient::ApiClient;
-use cloudflare::framework::{Environment, HttpApiClient, HttpApiClientConfig};
+use cloudflare::framework::async_api::Client;
+use cloudflare::framework::{Environment, HttpApiClientConfig};
 use serde::Deserialize;
 use std::str::FromStr;
+use tokio::time::sleep;
 
 #[derive(Deserialize)]
 struct GetIP {
@@ -28,23 +29,26 @@ pub enum DdnsError {
     FailedApiRequest(String),
 }
 
-fn get_ip(ipserver: &str) -> Result<String, DdnsError> {
-    let body = reqwest::blocking::get(ipserver)
+async fn get_ip(ipserver: &str) -> Result<String, DdnsError> {
+    let body = reqwest::get(ipserver)
+        .await
         .map_err(|err| DdnsError::FailedGetIp(err.to_string()))?
         .text()
+        .await
         .map_err(|err| DdnsError::FailedGetIp(err.to_string()))?;
     let ip: GetIP = serde_json::from_str(&body)
         .map_err(|err| DdnsError::FailedGetIp(format!("Failed to deserialize {}", err)))?;
     Ok(ip.ip)
 }
 
-fn look_up(domain: &str) -> Result<DNSRecord, DdnsError> {
-    use trust_dns_resolver::Resolver;
+async fn look_up(domain: &str) -> Result<DNSRecord, DdnsError> {
+    use trust_dns_resolver::TokioAsyncResolver;
 
-    let resolver =
-        Resolver::from_system_conf().map_err(|err| DdnsError::FailedLookUp(err.to_string()))?;
+    let resolver = TokioAsyncResolver::tokio_from_system_conf()
+        .map_err(|err| DdnsError::FailedLookUp(err.to_string()))?;
     let response = resolver
         .lookup_ip(domain)
+        .await
         .map_err(|err| DdnsError::FailedLookUp(err.to_string()))?;
     let address = response
         .iter()
@@ -57,9 +61,9 @@ fn look_up(domain: &str) -> Result<DNSRecord, DdnsError> {
     })
 }
 
-fn get_client(token: String) -> Result<HttpApiClient, DdnsError> {
+fn get_client(token: String) -> Result<Client, DdnsError> {
     let credentials = cloudflare::framework::auth::Credentials::UserAuthToken { token };
-    let api_client = HttpApiClient::new(
+    let api_client = Client::new(
         credentials,
         HttpApiClientConfig::default(),
         Environment::Production,
@@ -68,7 +72,7 @@ fn get_client(token: String) -> Result<HttpApiClient, DdnsError> {
     Ok(api_client)
 }
 
-fn get_zone_id(client: &HttpApiClient, zone: &str) -> Result<String, DdnsError> {
+async fn get_zone_id(client: &Client, zone: &str) -> Result<String, DdnsError> {
     let zones = client
         .request(&zone::ListZones {
             params: zone::ListZonesParams {
@@ -81,6 +85,7 @@ fn get_zone_id(client: &HttpApiClient, zone: &str) -> Result<String, DdnsError> 
                 search_match: None,
             },
         })
+        .await
         .map_err(|err| DdnsError::FailedApiRequest(err.to_string()))?
         .result;
     let zone_id = &zones
@@ -90,7 +95,7 @@ fn get_zone_id(client: &HttpApiClient, zone: &str) -> Result<String, DdnsError> 
     Ok(zone_id.clone())
 }
 
-fn get_dns_id(client: &HttpApiClient, zone_id: &str, domain: &str) -> Result<String, DdnsError> {
+async fn get_dns_id(client: &Client, zone_id: &str, domain: &str) -> Result<String, DdnsError> {
     let dns = client
         .request(&dns::ListDnsRecords {
             zone_identifier: zone_id,
@@ -104,6 +109,7 @@ fn get_dns_id(client: &HttpApiClient, zone_id: &str, domain: &str) -> Result<Str
                 search_match: None,
             },
         })
+        .await
         .map_err(|err| DdnsError::FailedApiRequest(err.to_string()))?
         .result;
     let dns_id = &dns
@@ -115,9 +121,14 @@ fn get_dns_id(client: &HttpApiClient, zone_id: &str, domain: &str) -> Result<Str
     Ok(dns_id.clone())
 }
 
-pub fn update_ip(token: &str, zone: &str, domain: &str, ipserver: &str) -> Result<(), DdnsError> {
-    let public_ip = get_ip(ipserver)?;
-    let current_ip = look_up(domain)?;
+pub async fn update_ip(
+    token: &str,
+    zone: &str,
+    domain: &str,
+    ipserver: &str,
+) -> Result<(), DdnsError> {
+    let public_ip = get_ip(ipserver).await?;
+    let current_ip = look_up(domain).await?;
     log::info!(
         "{}'s ip is {}, currently public ip is {}",
         domain,
@@ -129,8 +140,11 @@ pub fn update_ip(token: &str, zone: &str, domain: &str, ipserver: &str) -> Resul
         log::info!("Update {}'s ip to {}", domain, public_ip);
 
         let client = get_client(token.to_string().to_string())?;
-        let zone_id = get_zone_id(&client, zone)?;
-        let dns_id = get_dns_id(&client, &zone_id, domain)?;
+        log::info!("Client get");
+        let zone_id = get_zone_id(&client, zone).await?;
+        log::info!("Zone get");
+        let dns_id = get_dns_id(&client, &zone_id, domain).await?;
+        log::info!("Dns get");
 
         log::debug!("zone identifier: {}, dns identifier: {}", zone_id, dns_id);
 
@@ -148,6 +162,7 @@ pub fn update_ip(token: &str, zone: &str, domain: &str, ipserver: &str) -> Resul
                     },
                 },
             })
+            .await
             .map_err(|err| DdnsError::FailedApiRequest(err.to_string()))?;
     }
 
@@ -156,7 +171,7 @@ pub fn update_ip(token: &str, zone: &str, domain: &str, ipserver: &str) -> Resul
         current_ip.valid - std::time::Instant::now()
     );
     while current_ip.valid > std::time::Instant::now() {
-        std::thread::sleep(current_ip.valid - std::time::Instant::now());
+        sleep(current_ip.valid - std::time::Instant::now()).await;
     }
 
     Ok(())
