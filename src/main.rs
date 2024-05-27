@@ -23,7 +23,7 @@ struct Args {
 }
 
 #[tokio::main]
-async fn main() -> () {
+async fn main() {
     env_logger::init();
     let args = Args::parse();
 
