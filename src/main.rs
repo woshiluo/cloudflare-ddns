@@ -7,11 +7,9 @@ use tokio::time::{sleep, Duration};
 #[derive(Parser, Debug)]
 #[clap(about, version, author)]
 struct Args {
-    /// Name of the person to greet
     #[clap(long)]
     token: String,
 
-    /// Number of times to greet
     #[clap(long)]
     zone: String,
 
@@ -20,16 +18,28 @@ struct Args {
 
     #[clap(long)]
     ipserver: String,
+
+    #[clap(long)]
+    ipv6_device: Option<String>,
 }
 
 #[tokio::main]
 async fn main() {
-    env_logger::init();
+    // env_logger::init();
     let args = Args::parse();
+    env_logger::init();
 
     loop {
         log::info!("Start Try update ip");
-        if let Err(err) = update_ip(&args.token, &args.zone, &args.domain, &args.ipserver).await {
+        if let Err(err) = update_ip(
+            &args.token,
+            &args.zone,
+            &args.domain,
+            &args.ipserver,
+            &args.ipv6_device,
+        )
+        .await
+        {
             log::error!("{:?}", err);
         }
         sleep(Duration::from_secs(60)).await;
