@@ -7,7 +7,7 @@ edition = "2021"
 
 [dependencies]
 reqwest = "0.11.8"
-cloudflare = { git = "https://github.com/cloudflare/cloudflare-rs" }
+cloudflare = { path = "./cloudflare-rs/cloudflare" }
 
 serde = "1"
 serde_json = "1.0"
