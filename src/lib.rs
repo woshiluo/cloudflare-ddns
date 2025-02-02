@@ -241,7 +241,7 @@ pub async fn update_ip(
     }
 
     if public_ip != current_ip.ip {
-        log::info!("Update {}'s ip to {}", domain, public_ipv6);
+        log::info!("Update {}'s ip to {}", domain, public_ip);
 
         let client = get_client(token.to_string().to_string())?;
         log::info!("Client get");
@@ -271,7 +271,7 @@ pub async fn update_ip(
     }
 
     if enable_ipv6 && public_ipv6 != current_ipv6.ip {
-        log::info!("Update {}'s ipv6 to {}", domain, public_ip);
+        log::info!("Update {}'s ipv6 to {}", domain, public_ipv6);
 
         let client = get_client(token.to_string().to_string())?;
         log::info!("Client get");
