@@ -17,7 +17,7 @@ struct Args {
     domain: String,
 
     #[clap(long)]
-    ipserver: String,
+    ipserver: Option<String>,
 
     #[clap(long)]
     ipv6_device: Option<String>,

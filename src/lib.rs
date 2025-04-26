@@ -202,109 +202,113 @@ pub async fn update_ip(
     token: &str,
     zone: &str,
     domain: &str,
-    ipserver: &str,
+    ipserver: &Option<String>,
     ipv6_device: &Option<String>,
 ) -> Result<(), DdnsError> {
     let enable_ipv6 = ipv6_device.is_some();
-    let public_ip = get_ip(ipserver).await?;
-    let public_ipv6 = match ipv6_device {
-        Some(name) => get_ipv6(name.as_str())?,
-        None => "".to_string(),
-    };
-    let current_ip = look_up(domain).await?;
+    let enable_ipv4 = ipserver.is_some();
 
-    let current_ipv6 = match match enable_ipv6 {
-        true => look_upv6(domain).await,
-        false => Err(DdnsError::Message("No ipv6 device input".to_string())),
-    } {
-        Ok(ip) => ip,
-        Err(err) => {
-            log::warn!("Failed get current ipv6 {:?}", err);
-            DNSRecord::empty()
+    let ipv4_valid = if enable_ipv4 {
+        let public_ip = get_ip(ipserver.clone().unwrap().as_str()).await?;
+        let current_ip = look_up(domain).await?;
+
+        log::info!(
+            "{}'s ip is {}, currently public ip is {}",
+            domain,
+            current_ip.ip,
+            public_ip,
+        );
+        if public_ip != current_ip.ip {
+            log::info!("Update {}'s ip to {}", domain, public_ip);
+
+            let client = get_client(token.to_string().to_string())?;
+            log::info!("Client get");
+            let zone_id = get_zone_id(&client, zone).await?;
+            log::info!("Zone get");
+            let dns_id = get_dns_id_a(&client, &zone_id, domain).await?;
+            log::info!("Dns get");
+
+            log::debug!("zone identifier: {}, dns identifier: {}", zone_id, dns_id);
+
+            // TODO: create record
+            client
+                .request(&dns::UpdateDnsRecord {
+                    zone_identifier: &zone_id,
+                    identifier: &dns_id,
+                    params: dns::UpdateDnsRecordParams {
+                        ttl: Some(60),
+                        proxied: None,
+                        name: domain,
+                        content: dns::DnsContent::A {
+                            content: std::net::Ipv4Addr::from_str(&public_ip)
+                                .map_err(|err| DdnsError::Message(err.to_string()))?,
+                        },
+                    },
+                })
+                .await
+                .map_err(|err| DdnsError::FailedApiRequest(err.to_string()))?;
         }
+        current_ip.valid
+    } else {
+        std::time::Instant::now() + std::time::Duration::from_secs(180)
     };
-
-    log::info!(
-        "{}'s ip is {}, currently public ip is {}",
-        domain,
-        current_ip.ip,
-        public_ip,
-    );
 
     if enable_ipv6 {
+        let public_ipv6 = match ipv6_device {
+            Some(name) => get_ipv6(name.as_str())?,
+            None => "".to_string(),
+        };
+
+        let current_ipv6 = match look_upv6(domain).await {
+            Ok(ip) => ip,
+            Err(err) => {
+                log::warn!("Failed get current ipv6 {:?}", err);
+                DNSRecord::empty()
+            }
+        };
+
         log::info!(
             "{}'s ipv6 is {}, currently public ip is {}",
             domain,
             &current_ipv6.ip,
             public_ipv6,
-        )
-    }
+        );
+        if public_ipv6 != current_ipv6.ip {
+            log::info!("Update {}'s ipv6 to {}", domain, public_ipv6);
 
-    if public_ip != current_ip.ip {
-        log::info!("Update {}'s ip to {}", domain, public_ip);
+            let client = get_client(token.to_string().to_string())?;
+            log::info!("Client get");
+            let zone_id = get_zone_id(&client, zone).await?;
+            log::info!("Zone get");
+            let dns_id = get_dns_id_aaaa(&client, &zone_id, domain).await?;
+            log::info!("Dns get");
 
-        let client = get_client(token.to_string().to_string())?;
-        log::info!("Client get");
-        let zone_id = get_zone_id(&client, zone).await?;
-        log::info!("Zone get");
-        let dns_id = get_dns_id_a(&client, &zone_id, domain).await?;
-        log::info!("Dns get");
+            log::debug!("zone identifier: {}, dns identifier: {}", zone_id, dns_id);
 
-        log::debug!("zone identifier: {}, dns identifier: {}", zone_id, dns_id);
-
-        client
-            .request(&dns::UpdateDnsRecord {
-                zone_identifier: &zone_id,
-                identifier: &dns_id,
-                params: dns::UpdateDnsRecordParams {
-                    ttl: Some(60),
-                    proxied: None,
-                    name: domain,
-                    content: dns::DnsContent::A {
-                        content: std::net::Ipv4Addr::from_str(&public_ip)
-                            .map_err(|err| DdnsError::Message(err.to_string()))?,
+            // TODO: create record
+            client
+                .request(&dns::UpdateDnsRecord {
+                    zone_identifier: &zone_id,
+                    identifier: &dns_id,
+                    params: dns::UpdateDnsRecordParams {
+                        ttl: Some(60),
+                        proxied: None,
+                        name: domain,
+                        content: dns::DnsContent::AAAA {
+                            content: std::net::Ipv6Addr::from_str(&public_ipv6)
+                                .map_err(|err| DdnsError::Message(err.to_string()))?,
+                        },
                     },
-                },
-            })
-            .await
-            .map_err(|err| DdnsError::FailedApiRequest(err.to_string()))?;
+                })
+                .await
+                .map_err(|err| DdnsError::FailedApiRequest(err.to_string()))?;
+        }
     }
 
-    if enable_ipv6 && public_ipv6 != current_ipv6.ip {
-        log::info!("Update {}'s ipv6 to {}", domain, public_ipv6);
-
-        let client = get_client(token.to_string().to_string())?;
-        log::info!("Client get");
-        let zone_id = get_zone_id(&client, zone).await?;
-        log::info!("Zone get");
-        let dns_id = get_dns_id_aaaa(&client, &zone_id, domain).await?;
-        log::info!("Dns get");
-
-        log::debug!("zone identifier: {}, dns identifier: {}", zone_id, dns_id);
-
-        client
-            .request(&dns::UpdateDnsRecord {
-                zone_identifier: &zone_id,
-                identifier: &dns_id,
-                params: dns::UpdateDnsRecordParams {
-                    ttl: Some(60),
-                    proxied: None,
-                    name: domain,
-                    content: dns::DnsContent::AAAA {
-                        content: std::net::Ipv6Addr::from_str(&public_ipv6)
-                            .map_err(|err| DdnsError::Message(err.to_string()))?,
-                    },
-                },
-            })
-            .await
-            .map_err(|err| DdnsError::FailedApiRequest(err.to_string()))?;
-    }
-    log::info!(
-        "Waiting for {:?}",
-        current_ip.valid - std::time::Instant::now()
-    );
-    while current_ip.valid > std::time::Instant::now() {
-        sleep(current_ip.valid - std::time::Instant::now()).await;
+    // TODO: check_max ipv6_valid
+    log::info!("Waiting for {:?}", ipv4_valid - std::time::Instant::now());
+    while ipv4_valid > std::time::Instant::now() {
+        sleep(ipv4_valid - std::time::Instant::now()).await;
     }
 
     Ok(())
