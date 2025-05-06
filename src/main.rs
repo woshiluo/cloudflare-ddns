@@ -17,6 +17,9 @@ struct Args {
     domain: String,
 
     #[clap(long)]
+    ipv6_domain: String,
+
+    #[clap(long)]
     ipserver: Option<String>,
 
     #[clap(long)]
@@ -35,6 +38,7 @@ async fn main() {
             &args.token,
             &args.zone,
             &args.domain,
+            &args.ipv6_domain,
             &args.ipserver,
             &args.ipv6_device,
         )

@@ -3,9 +3,9 @@
 // Copyright (C) 2022 Woshiluo Luo <woshiluo.luo@outlook.com>
 // Distributed under terms of the GNU AGPLv3+ license.
 //
-use cloudflare::endpoints::{dns, zone};
-use cloudflare::framework::async_api::Client;
-use cloudflare::framework::{Environment, HttpApiClientConfig};
+use cloudflare::endpoints::{dns::dns, zones::zone};
+use cloudflare::framework::client::async_api::Client;
+use cloudflare::framework::{client::ClientConfig, Environment};
 use serde::Deserialize;
 use std::str::FromStr;
 use tokio::time::sleep;
@@ -110,7 +110,7 @@ fn get_client(token: String) -> Result<Client, DdnsError> {
     let credentials = cloudflare::framework::auth::Credentials::UserAuthToken { token };
     let api_client = Client::new(
         credentials,
-        HttpApiClientConfig::default(),
+        ClientConfig::default(),
         Environment::Production,
     )
     .map_err(|err| DdnsError::FailedApiRequest(err.to_string()))?;
@@ -201,7 +201,8 @@ async fn get_dns_id_aaaa(
 pub async fn update_ip(
     token: &str,
     zone: &str,
-    domain: &str,
+    ipv4_domain: &str,
+    ipv6_domain: &str,
     ipserver: &Option<String>,
     ipv6_device: &Option<String>,
 ) -> Result<(), DdnsError> {
@@ -209,6 +210,7 @@ pub async fn update_ip(
     let enable_ipv4 = ipserver.is_some();
 
     let ipv4_valid = if enable_ipv4 {
+        let domain = ipv4_domain;
         let public_ip = get_ip(ipserver.clone().unwrap().as_str()).await?;
         let current_ip = look_up(domain).await?;
 
@@ -254,6 +256,7 @@ pub async fn update_ip(
     };
 
     if enable_ipv6 {
+        let domain = ipv6_domain;
         let public_ipv6 = match ipv6_device {
             Some(name) => get_ipv6(name.as_str())?,
             None => "".to_string(),
